@@ -22,9 +22,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with deluge.    If not, write to:
-# 	The Free Software Foundation, Inc.,
-# 	51 Franklin Street, Fifth Floor
-# 	Boston, MA  02110-1301, USA.
+#     The Free Software Foundation, Inc.,
+#     51 Franklin Street, Fifth Floor
+#     Boston, MA  02110-1301, USA.
 #
 #    In addition, as a special exception, the copyright holders give
 #    permission to link the code of portions of this program with the OpenSSL
@@ -65,6 +65,17 @@ def execute_url(url):
         except OSError:
             print 'Unable to open URL %s' % (url, )
 
+def execute_mpv(url):
+    if sys.platform == 'win32':
+        os.startfile(url)
+    elif sys.platform == 'darwin':
+        subprocess.Popen(['/usr/local/bin/mpv', url])
+    else:
+        try:
+            subprocess.Popen(['xdg-open', url])
+        except OSError:
+            print 'Unable to open URL %s' % (url, )
+
 
 class GtkUI(GtkPluginBase):
     def get_widget(self, widget_name):
@@ -74,66 +85,66 @@ class GtkUI(GtkPluginBase):
         else:
             return main_window.main_builder.get_object(widget_name)
 
-    def enable(self):
-        self.glade = gtk.glade.XML(get_resource("config.glade"))
-
-        component.get("Preferences").add_page("Streaming", self.glade.get_widget("prefs_box"))
+def enable(self):
+    self.glade = gtk.glade.XML(get_resource("config.glade"))
+    
+    component.get("Preferences").add_page("Streaming", self.glade.get_widget("prefs_box"))
         component.get("PluginManager").register_hook("on_apply_prefs", self.on_apply_prefs)
         component.get("PluginManager").register_hook("on_show_prefs", self.on_show_prefs)
-
+        
         file_menu = self.get_widget('menu_file_tab')
-
+        
         self.sep = gtk.SeparatorMenuItem()
         self.item = gtk.MenuItem(_("_Stream this file"))
         self.item.connect("activate", self.on_menuitem_stream)
-
+        
         file_menu.append(self.sep)
         file_menu.append(self.item)
-
+        
         self.sep.show()
         self.item.show()
-
+        
         torrentmenu = component.get("MenuBar").torrentmenu
-
+        
         self.sep_torrentmenu = gtk.SeparatorMenuItem()
         self.item_torrentmenu = gtk.MenuItem(_("_Stream this torrent"))
         self.item_torrentmenu.connect("activate", self.on_torrentmenu_menuitem_stream)
-
+        
         torrentmenu.append(self.sep_torrentmenu)
         torrentmenu.append(self.item_torrentmenu)
-
+        
         self.sep_torrentmenu.show()
         self.item_torrentmenu.show()
-
+    
     def disable(self):
         component.get("Preferences").remove_page("Streaming")
         component.get("PluginManager").deregister_hook("on_apply_prefs", self.on_apply_prefs)
         component.get("PluginManager").deregister_hook("on_show_prefs", self.on_show_prefs)
-
+        
         file_menu = self.get_widget('menu_file_tab')
-
+        
         file_menu.remove(self.item)
         file_menu.remove(self.sep)
-
+        
         torrentmenu = component.get("MenuBar").torrentmenu
-
+        
         torrentmenu.remove(self.item_torrentmenu)
         torrentmenu.remove(self.sep_torrentmenu)
 
-    @defer.inlineCallbacks
+@defer.inlineCallbacks
     def on_apply_prefs(self):
         log.debug("applying prefs for Streaming")
-
+        
         if self.glade.get_widget("input_serve_standalone").get_active():
             serve_method = 'standalone'
         elif self.glade.get_widget("input_serve_webui").get_active():
             serve_method = 'webui'
-
+        
         if self.glade.get_widget("input_ssl_cert_daemon").get_active():
             ssl_source = 'daemon'
         elif self.glade.get_widget("input_ssl_cert_custom").get_active():
             ssl_source = 'custom'
-
+        
         config = {
             "ip": self.glade.get_widget("input_ip").get_text(),
             "port": int(self.glade.get_widget("input_port").get_text()),
@@ -149,21 +160,21 @@ class GtkUI(GtkPluginBase):
             "serve_method": serve_method,
             "ssl_source": ssl_source,
         }
-
+        
         result = yield client.streaming.set_config(config)
-
+        
         if result:
             message_type, message_class, message = result
             if message_type == 'error':
                 topic = 'Unknown error type'
                 if message_class == 'ssl':
                     topic = 'SSL Failed'
-
+                
                 dialogs.ErrorDialog(topic, message).run()
 
-    def on_show_prefs(self):
-        client.streaming.get_config().addCallback(self.cb_get_config)
-
+def on_show_prefs(self):
+    client.streaming.get_config().addCallback(self.cb_get_config)
+    
     def cb_get_config(self, config):
         "callback for on show_prefs"
         self.glade.get_widget("input_ip").set_text(config["ip"])
@@ -177,48 +188,35 @@ class GtkUI(GtkPluginBase):
         self.glade.get_widget("input_remote_password").set_text(config["remote_password"])
         self.glade.get_widget("input_ssl_priv_key_path").set_text(config["ssl_priv_key_path"])
         self.glade.get_widget("input_ssl_cert_path").set_text(config["ssl_cert_path"])
-
+        
         self.glade.get_widget("input_serve_standalone").set_active(config["serve_method"] == "standalone")
         self.glade.get_widget("input_serve_webui").set_active(config["serve_method"] == "webui")
-
+        
         self.glade.get_widget("input_ssl_cert_daemon").set_active(config["ssl_source"] == "daemon")
         self.glade.get_widget("input_ssl_cert_custom").set_active(config["ssl_source"] == "custom")
-
+        
         api_url = 'http%s://%s:%s/streaming/stream' % (('s' if config["use_ssl"] else ''), config["ip"], config["port"])
         self.glade.get_widget("output_remote_url").set_text(api_url)
-
+    
     def stream_ready(self, result):
         if result['status'] == 'success':
-            if result.get('use_stream_urls', False):
-                url = "stream+%s" % result['url']
-                if result.get('auto_open_stream_urls', False):
-                    threads.deferToThread(execute_url, url)
-                else:
-                    def on_dialog_callback(response):
-                        if response == gtk.RESPONSE_YES:
-                            threads.deferToThread(execute_url, url)
+            threads.deferToThread(execute_mpv, result['url'])
 
-                    dialogs.YesNoDialog('Stream ready', 'Do you want to play the video?').run().addCallback(on_dialog_callback)
-            else:
-                dialogs.ErrorDialog('Stream ready', 'Copy the link into a media player', details=result['url']).run()
-        else:
-            dialogs.ErrorDialog('Stream failed', 'Was unable to prepare the stream', details=result).run()
-
-    def on_menuitem_stream(self, data=None):
-        torrent_id = component.get("TorrentView").get_selected_torrents()[0]
-
-        ft = component.get("TorrentDetails").tabs['Files']
+def on_menuitem_stream(self, data=None):
+    torrent_id = component.get("TorrentView").get_selected_torrents()[0]
+    
+    ft = component.get("TorrentDetails").tabs['Files']
         paths = ft.listview.get_selection().get_selected_rows()[1]
-
+        
         selected = []
         for path in paths:
             selected.append(ft.treestore.get_iter(path))
-
+        
         for select in selected:
             path = ft.get_file_path(select)
             client.streaming.stream_torrent(infohash=torrent_id, filepath_or_index=path, includes_name=True).addCallback(self.stream_ready)
             break
 
-    def on_torrentmenu_menuitem_stream(self, data=None):
-        torrent_id = component.get("TorrentView").get_selected_torrents()[0]
-        client.streaming.stream_torrent(infohash=torrent_id).addCallback(self.stream_ready)
+def on_torrentmenu_menuitem_stream(self, data=None):
+    torrent_id = component.get("TorrentView").get_selected_torrents()[0]
+    client.streaming.stream_torrent(infohash=torrent_id).addCallback(self.stream_ready)
